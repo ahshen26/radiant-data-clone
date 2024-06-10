@@ -1,6 +1,5 @@
 viz_type <- c(
-  "Distribution" = "dist", "Density" = "density", "Scatter" = "scatter",
-  "Surface" = "surface", "Line" = "line", "Bar" = "bar", "Box-plot" = "box"
+  "Distribution" = "dist", "Density" = "density", "Scatter" = "scatter", "Line" = "line", "Bar" = "bar", "Box-plot" = "box"
 )
 viz_check <- c("Line" = "line", "Loess" = "loess", "Jitter" = "jitter", "Interpolate" = "interpolate")
 viz_axes <- c(
