@@ -1,3 +1,4 @@
+
 #######################################
 ## Explore datasets
 #######################################
@@ -267,15 +268,26 @@ output$explore <- DT::renderDataTable({
       searchCols <- lapply(r_state$explore_search_columns, function(x) list(search = x))
       order <- r_state$explore_state$order
       pageLength <- r_state$explore_state$length
-    })
 
-    caption <- if (is.empty(input$expl_tab_slice)) NULL else glue("Table slice {input$expl_tab_slice} will be applied on Download, Store, or Report")
-    dtab(
-      expl,
-      dec = input$expl_dec, searchCols = searchCols, order = order,
-      pageLength = pageLength,
-      caption = caption
-    )
+      # Assuming df is the data frame and expl_vars are the selected variables
+      dataset <- get(input$dataset, envir = .GlobalEnv)
+      vars <- input$expl_vars
+      var_type <- sapply(dataset[vars], class)
+
+      if (all(var_type %in% c("factor", "character"))) {
+        result <- dataset %>%
+          group_by(across(all_of(vars))) %>%
+          summarise(
+            Count = n(),
+            Percentage = (n() / nrow(dataset)) * 100
+          ) %>%
+          rename(Level = !!sym(vars))
+
+        DT::datatable(result)
+      } else {
+        DT::datatable(expl$tab)
+      }
+    })
   })
 })
 
