@@ -12,6 +12,11 @@ expl_inputs <- reactive({
   expl_args$arr <- if (input$show_filter) input$data_arrange else ""
   expl_args$rows <- if (input$show_filter) input$data_rows else ""
   expl_args$dataset <- input$dataset
+
+  # Use selected variables based on variable type
+  selected_vars <- input$expl_vars
+  expl_args$vars <- selected_vars
+
   for (i in r_drop(names(expl_args))) {
     expl_args[[i]] <- input[[paste0("expl_", i)]]
   }
@@ -35,17 +40,42 @@ expl_sum_inputs <- reactive({
 })
 
 ## UI-elements for explore
-output$ui_expl_vars <- renderUI({
-  # isNum <- .get_class() %in% c("integer", "numeric", "ts", "factor", "logical")
-  # vars <- varnames()[isNum]
-  vars <- varnames()
-  req(available(vars))
+output$ui_expl_var_type <- renderUI({
   selectInput(
-    "expl_vars",
-    label = "Numeric variable(s):", choices = vars,
-    selected = state_multiple("expl_vars", vars, isolate(input$expl_vars)), multiple = TRUE,
-    size = min(8, length(vars)), selectize = FALSE
+    "expl_var_type",
+    label = "Variable type:",
+    choices = c("Numeric" = "numeric", "Categorical" = "categorical"),
+    selected = "numeric"
   )
+})
+
+output$ui_expl_vars <- renderUI({
+  dataset <- get(input$dataset, envir = .GlobalEnv)
+  vars <- names(dataset)
+
+  if (input$expl_var_type == "numeric") {
+    variable_choices <- vars[sapply(dataset, is.numeric)]
+    selectInput(
+      "expl_vars",
+      label = "Numeric variable(s):",
+      choices = variable_choices,
+      selected = state_multiple("expl_vars", variable_choices, isolate(input$expl_vars)),
+      multiple = TRUE,
+      size = min(8, length(variable_choices)),
+      selectize = FALSE
+    )
+  } else {
+    variable_choices <- vars[sapply(dataset, function(x) is.factor(x) || is.character(x))]
+    selectInput(
+      "expl_vars",
+      label = "Categorical variable(s):",
+      choices = variable_choices,
+      selected = state_multiple("expl_vars", variable_choices, isolate(input$expl_vars)),
+      multiple = TRUE,
+      size = min(8, length(variable_choices)),
+      selectize = FALSE
+    )
+  }
 })
 
 output$ui_expl_byvar <- renderUI({
@@ -96,16 +126,30 @@ output$ui_expl_fun <- renderUI({
       input$expl_fun
     }
   })
+
+  # Define the allowed functions for categorical variables
+  categorical_funs <- c("n_missing", "modal", "n_obs", "n_distinct")
+
+  # Select functions based on variable type
+  available_funs <- if (input$expl_var_type == "categorical") {
+    categorical_funs
+  } else {
+    r_funs
+  }
+
   selectizeInput(
     "expl_fun",
     label = "Apply function(s):",
-    choices = r_funs, selected = sel, multiple = TRUE,
+    choices = available_funs,
+    selected = sel[sel %in% available_funs],  # Ensure the selected functions are in the allowed list
+    multiple = TRUE,
     options = list(
       placeholder = "Select functions",
       plugins = list("remove_button", "drag_drop")
     )
   )
 })
+
 
 output$ui_expl_top <- renderUI({
   if (is.empty(input$expl_vars)) {
@@ -142,16 +186,16 @@ output$ui_Explore <- renderUI({
       uiOutput("ui_expl_run")
     ),
     wellPanel(
-      # actionLink("expl_clear", "Clear settings", icon = icon("sync", verify_fa = FALSE), style="color:black"),
+      uiOutput("ui_expl_var_type"),
       uiOutput("ui_expl_vars"),
       uiOutput("ui_expl_byvar"),
       uiOutput("ui_expl_fun"),
       uiOutput("ui_expl_top"),
       returnTextAreaInput("expl_tab_slice",
-        label = "Table slice (rows):",
-        rows = 1,
-        value = state_init("expl_tab_slice"),
-        placeholder = "e.g., 1:5 and press return"
+                          label = "Table slice (rows):",
+                          rows = 1,
+                          value = state_init("expl_tab_slice"),
+                          placeholder = "e.g., 1:5 and press return"
       ),
       numericInput("expl_dec", label = "Decimals:", value = state_init("expl_dec", 3), min = 0)
     ),
@@ -170,11 +214,12 @@ output$ui_Explore <- renderUI({
 })
 
 .explore <- eventReactive(input$expl_run, {
-  if (not_available(input$expl_vars) || is.null(input$expl_top)) {
+  combined_vars <- input$expl_vars
+  if (not_available(combined_vars) || is.null(input$expl_top)) {
     return()
   } else if (!is.empty(input$expl_byvar) && not_available(input$expl_byvar)) {
     return()
-  } else if (available(input$expl_byvar) && any(input$expl_byvar %in% input$expl_vars)) {
+  } else if (available(input$expl_byvar) && any(input$expl_byvar %in% combined_vars)) {
     return()
   }
   expli <- expl_inputs()
@@ -212,8 +257,8 @@ output$explore <- DT::renderDataTable({
       expl_reset("expl_byvar", nc)
       expl_reset("expl_fun", nc)
       if (!is.null(r_state$expl_top) &&
-        !is.null(input$expl_top) &&
-        !identical(r_state$expl_top, input$expl_top)) {
+          !is.null(input$expl_top) &&
+          !identical(r_state$expl_top, input$expl_top)) {
         r_state$expl_top <<- input$expl_top
         r_state$explore_state <<- list()
         r_state$explore_search_columns <<- rep("", nc)
@@ -351,3 +396,4 @@ observeEvent(input$modal_explore_screenshot, {
   explore_report()
   removeModal()
 })
+
