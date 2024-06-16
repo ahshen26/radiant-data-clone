@@ -12,15 +12,15 @@ expl_inputs <- reactive({
   expl_args$arr <- if (input$show_filter) input$data_arrange else ""
   expl_args$rows <- if (input$show_filter) input$data_rows else ""
   expl_args$dataset <- input$dataset
-  
+
   # Use selected variables based on variable type
   selected_vars <- input$expl_vars
   expl_args$vars <- selected_vars
-  
+
   for (i in r_drop(names(expl_args))) {
     expl_args[[i]] <- input[[paste0("expl_", i)]]
   }
-  
+
   expl_args
 })
 
@@ -39,7 +39,16 @@ expl_sum_inputs <- reactive({
   expl_sum_args
 })
 
+## Function to get variable names
+varnames <- reactive({
+  req(input$dataset)
+  dataset <- get(input$dataset, envir = r_data, inherits = TRUE)
+  if (is.null(dataset)) return(NULL)
+  names(dataset)
+})
+
 ## UI-elements for explore
+
 output$ui_expl_var_type <- renderUI({
   selectInput(
     "expl_var_type",
@@ -50,9 +59,12 @@ output$ui_expl_var_type <- renderUI({
 })
 
 output$ui_expl_vars <- renderUI({
-  dataset <- get(input$dataset, envir = .GlobalEnv)
+  req(input$dataset)
+  dataset <- get(input$dataset, envir = r_data, inherits = TRUE)
+  if (is.null(dataset)) return(NULL)
+
   vars <- names(dataset)
-  
+
   if (input$expl_var_type == "numeric") {
     variable_choices <- vars[sapply(dataset, is.numeric)]
     selectInput(
@@ -83,14 +95,14 @@ output$ui_expl_byvar <- renderUI({
     vars <- groupable_vars()
   })
   req(available(vars))
-  
+
   if (any(vars %in% input$expl_vars)) {
     vars <- base::setdiff(vars, input$expl_vars)
     names(vars) <- varnames() %>%
       (function(x) x[match(vars, x)]) %>%
       names()
   }
-  
+
   isolate({
     ## if nothing is selected expl_byvar is also null
     if ("expl_byvar" %in% names(input) && is.null(input$expl_byvar)) {
@@ -104,7 +116,7 @@ output$ui_expl_byvar <- renderUI({
       }
     }
   })
-  
+
   selectizeInput(
     "expl_byvar",
     label = "Group by:", choices = vars,
@@ -126,17 +138,17 @@ output$ui_expl_fun <- renderUI({
       input$expl_fun
     }
   })
-  
+
   # Define the allowed functions for categorical variables
   categorical_funs <- c("n_missing", "modal", "n_obs", "n_distinct")
-  
+
   # Select functions based on variable type
   available_funs <- if (input$expl_var_type == "categorical") {
     categorical_funs
   } else {
     r_funs
   }
-  
+
   selectizeInput(
     "expl_fun",
     label = "Apply function(s):",
@@ -149,7 +161,6 @@ output$ui_expl_fun <- renderUI({
     )
   )
 })
-
 
 output$ui_expl_top <- renderUI({
   if (is.empty(input$expl_vars)) {
@@ -214,13 +225,15 @@ output$ui_Explore <- renderUI({
 })
 
 .explore <- eventReactive(input$expl_run, {
+  req(input$dataset)
+  dataset <- get(input$dataset, envir = r_data, inherits = TRUE)
   combined_vars <- input$expl_vars
   if (not_available(combined_vars) || is.null(input$expl_top)) {
-    return()
+    return(NULL)
   } else if (!is.empty(input$expl_byvar) && not_available(input$expl_byvar)) {
-    return()
+    return(NULL)
   } else if (available(input$expl_byvar) && any(input$expl_byvar %in% combined_vars)) {
-    return()
+    return(NULL)
   }
   expli <- expl_inputs()
   expli$envir <- r_data
@@ -250,7 +263,7 @@ output$explore <- DT::renderDataTable({
       expl <- .explore()
       req(!is.null(expl))
       expl$shiny <- TRUE
-      
+
       ## resetting DT when changes occur
       nc <- ncol(expl$tab)
       expl_reset("expl_vars", nc)
@@ -263,16 +276,16 @@ output$explore <- DT::renderDataTable({
         r_state$explore_state <<- list()
         r_state$explore_search_columns <<- rep("", nc)
       }
-      
+
       searchCols <- lapply(r_state$explore_search_columns, function(x) list(search = x))
       order <- r_state$explore_state$order
       pageLength <- r_state$explore_state$length
-      
+
       # Assuming df is the data frame and expl_vars are the selected variables
-      dataset <- get(input$dataset, envir = .GlobalEnv)
+      dataset <- get(input$dataset, envir = r_data, inherits = TRUE)
       vars <- input$expl_vars
       var_type <- sapply(dataset[vars], class)
-      
+
       if (all(var_type %in% c("factor", "character"))) {
         result <- dataset %>%
           group_by(across(all_of(vars))) %>%
@@ -281,17 +294,17 @@ output$explore <- DT::renderDataTable({
             Percentage = round((n() / nrow(dataset)) * 100, 2)
           ) %>%
           rename(Level = !!sym(vars))
-        
+
         # Add row for missing values
         missing_count <- dataset %>%
           summarise(across(all_of(vars), ~sum(is.na(.)))) %>%
           summarise(Missing = sum(.))
-        
+
         missing_percentage <- round((missing_count$Missing / nrow(dataset)) * 100, 2)
-        
+
         result <- result %>%
           add_row(Level = "Missing", Count = missing_count$Missing, Percentage = missing_percentage)
-        
+
         DT::datatable(result) %>%
           DT::formatStyle('Percentage', textAlign = 'center') %>%
           DT::formatStyle('Count', textAlign = 'center') %>%
@@ -345,7 +358,7 @@ observeEvent(input$expl_store, {
   r_data[[dataset]] <- dat$tab
   register(dataset)
   updateSelectInput(session, "dataset", selected = input$dataset)
-  
+
   ## See https://shiny.posit.co/reference/shiny/latest/modalDialog.html
   showModal(
     modalDialog(
@@ -381,7 +394,7 @@ explore_report <- function() {
     }
     xcmd <- paste0(xcmd, "\n", dataset, " <- result$tab\nregister(\"", dataset, "\")")
   }
-  
+
   inp_main <- clean_args(expl_inputs(), expl_args)
   if (ts$tabsort != "") inp_main <- c(inp_main, tabsort = ts$tabsort)
   if (ts$tabfilt != "") inp_main <- c(inp_main, tabfilt = ts$tabfilt)
@@ -393,9 +406,9 @@ explore_report <- function() {
   } else {
     inp_main$tabslice <- input$expl_tab_slice
   }
-  
+
   inp_out <- list(clean_args(expl_sum_inputs(), expl_sum_args[-1]))
-  
+
   update_report(
     inp_main = inp_main,
     fun_name = "explore",
@@ -420,4 +433,5 @@ observeEvent(input$modal_explore_screenshot, {
   explore_report()
   removeModal()
 })
+
 
