@@ -65,8 +65,12 @@ output$ui_expl_vars <- renderUI({
 
   vars <- names(dataset)
 
+  # Identify binary variables (containing only 0 and 1)
+  binary_vars <- vars[sapply(dataset, function(x) all(x %in% c(0, 1)))]
+
   if (input$expl_var_type == "numeric") {
     variable_choices <- vars[sapply(dataset, is.numeric)]
+    variable_choices <- setdiff(variable_choices, binary_vars)  # Exclude binary variables
     selectInput(
       "expl_vars",
       label = "Numeric variable(s):",
@@ -78,6 +82,7 @@ output$ui_expl_vars <- renderUI({
     )
   } else {
     variable_choices <- vars[sapply(dataset, function(x) is.factor(x) || is.character(x))]
+    variable_choices <- union(variable_choices, binary_vars)  # Include binary variables
     selectInput(
       "expl_vars",
       label = "Categorical variable(s):",
@@ -286,8 +291,12 @@ output$explore <- DT::renderDataTable({
       vars <- input$expl_vars
       var_type <- sapply(dataset[vars], class)
 
-      if (all(var_type %in% c("factor", "character"))) {
+      # Check if any binary variable is included
+      binary_vars <- vars[sapply(dataset[vars], function(x) all(x %in% c(0, 1)))]
+
+      if (input$expl_var_type == "categorical" && (all(var_type %in% c("factor", "character")) || length(binary_vars) > 0)) {
         result <- dataset %>%
+          mutate(across(all_of(binary_vars), as.character)) %>%
           group_by(across(all_of(vars))) %>%
           summarise(
             Count = n(),
