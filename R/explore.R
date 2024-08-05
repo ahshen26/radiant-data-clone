@@ -29,7 +29,7 @@
 explore <- function(dataset, vars = "", byvar = "", fun = c("mean", "sd"),
                     top = "fun", tabfilt = "", tabsort = "", tabslice = "",
                     nr = Inf, data_filter = "", arr = "", rows = NULL,
-                    envir = parent.frame()) {
+                    variable = "num", envir = parent.frame()) {
   tvars <- vars
   if (!is.empty(byvar)) tvars <- unique(c(tvars, byvar))
 
@@ -39,6 +39,33 @@ explore <- function(dataset, vars = "", byvar = "", fun = c("mean", "sd"),
 
   ## in case : was used
   vars <- base::setdiff(colnames(dataset), byvar)
+
+  if (variable == "cat") {
+    # Handle categorical variable
+    cat_levels <- levels(as.factor(dataset[[vars]]))
+    count_table <- table(as.factor(dataset[[vars]]))
+    cat_df <- data.frame(Level = names(count_table), Count = as.vector(count_table))
+    cat_df$Percentage <- round((cat_df$Count / sum(cat_df$Count)) * 100, 2)
+
+    result <- list(
+      tab = cat_df,
+      df_name = df_name,
+      vars = vars,
+      byvar = byvar,
+      fun = fun,
+      top = top,
+      tabfilt = tabfilt,
+      tabsort = tabsort,
+      tabslice = tabslice,
+      nr = nr,
+      data_filter = data_filter,
+      arr = arr,
+      rows = rows,
+      cat_levels = cat_levels
+    ) %>% add_class("explore")
+
+    return(result)
+  }
 
   ## converting data as needed for summarization
   dc <- get_class(dataset)
@@ -125,7 +152,6 @@ explore <- function(dataset, vars = "", byvar = "", fun = c("mean", "sd"),
   tab <- gather(tab, "variable", "value", !!-(seq_along(byvar))) %>%
     extract(variable, into = c("variable", "fun"), regex = rex) %>%
     mutate(fun = factor(fun, levels = !!fun), variable = factor(variable, levels = vars)) %>%
-    # mutate(variable = paste0(variable, " {", dc[variable], "}")) %>%
     spread("fun", "value")
 
   ## flip the table if needed
@@ -181,8 +207,9 @@ explore <- function(dataset, vars = "", byvar = "", fun = c("mean", "sd"),
     rm(ind)
   }
 
-  list(
+  result <- list(
     tab = tab,
+    dataset = dataset,
     df_name = df_name,
     vars = vars,
     byvar = byvar,
@@ -196,6 +223,14 @@ explore <- function(dataset, vars = "", byvar = "", fun = c("mean", "sd"),
     arr = arr,
     rows = rows
   ) %>% add_class("explore")
+
+  if (variable == "cat") {
+    # Add the levels of the categorical variable to the result
+    cat_levels <- levels(as.factor(dataset[[vars]]))
+    result$cat_levels <- cat_levels
+  }
+
+  result
 }
 
 #' Summary method for the explore function
@@ -340,28 +375,13 @@ flip <- function(expl, top = "fun") {
 #' @export
 dtab.explore <- function(object, dec = 3, searchCols = NULL,
                          order = NULL, pageLength = NULL,
-                         caption = NULL, ...) {
+                         caption = NULL, variable = "num", ...) {
   style <- if (exists("bslib_current_version") && "4" %in% bslib_current_version()) "bootstrap4" else "bootstrap"
   tab <- object$tab
   cn_all <- colnames(tab)
-  cn_num <- cn_all[sapply(tab, is.numeric)]
-  cn_cat <- cn_all[-which(cn_all %in% cn_num)]
   isInt <- sapply(tab, is.integer)
   isDbl <- sapply(tab, is_double)
   dec <- ifelse(is.empty(dec) || dec < 0, 3, round(dec, 0))
-
-  top <- c("fun" = "Function", "var" = "Variables", "byvar" = paste0("Group by: ", object$byvar[1]))[object$top]
-  sketch <- shiny::withTags(
-    table(
-      thead(
-        tr(
-          th(" ", colspan = length(cn_cat)),
-          lapply(top, th, colspan = length(cn_num), class = "text-center")
-        ),
-        tr(lapply(cn_all, th))
-      )
-    )
-  )
 
   if (!is.empty(caption)) {
     ## from https://github.com/rstudio/DT/issues/630#issuecomment-461191378
@@ -371,52 +391,98 @@ dtab.explore <- function(object, dec = 3, searchCols = NULL,
   ## for display options see https://datatables.net/reference/option/dom
   dom <- if (nrow(tab) < 11) "t" else "ltip"
   fbox <- if (nrow(tab) > 5e6) "none" else list(position = "top")
-  dt_tab <- DT::datatable(
-    tab,
-    container = sketch,
-    caption = caption,
-    selection = "none",
-    rownames = FALSE,
-    filter = fbox,
-    ## must use fillContainer = FALSE to address
-    ## see https://github.com/rstudio/DT/issues/367
-    ## https://github.com/rstudio/DT/issues/379
-    fillContainer = FALSE,
-    style = style,
-    options = list(
-      dom = dom,
-      stateSave = TRUE, ## store state
-      searchCols = searchCols,
-      order = order,
-      columnDefs = list(list(orderSequence = c("desc", "asc"), targets = "_all")),
-      autoWidth = TRUE,
-      processing = FALSE,
-      pageLength = {
-        if (is.null(pageLength)) 10 else pageLength
-      },
-      lengthMenu = list(c(5, 10, 25, 50, -1), c("5", "10", "25", "50", "All"))
-    ),
-    ## https://github.com/rstudio/DT/issues/146#issuecomment-534319155
-    callback = DT::JS('$(window).on("unload", function() { table.state.clear(); })')
-  ) %>%
-    DT::formatStyle(., cn_cat, color = "white", backgroundColor = "grey")
 
-  ## rounding as needed
-  if (sum(isDbl) > 0) {
-    dt_tab <- DT::formatRound(dt_tab, names(isDbl)[isDbl], dec)
+  if (variable == "cat") {
+    sketch_cat <- shiny::withTags(
+      table(
+        thead(
+          tr(lapply(colnames(tab), th))
+        )
+      )
+    )
+    dt_cat_tab <- DT::datatable(
+      tab,
+      container = sketch_cat,
+      caption = caption,
+      selection = "none",
+      rownames = FALSE,
+      filter = fbox,
+      ## must use fillContainer = FALSE to address
+      ## see https://github.com/rstudio/DT/issues/367
+      ## https://github.com/rstudio/DT/issues/379
+      fillContainer = FALSE,
+      style = style,
+      options = list(
+        dom = dom,
+        stateSave = TRUE, ## store state
+        searchCols = searchCols,
+        order = order,
+        columnDefs = list(list(orderSequence = c("desc", "asc"), targets = "_all")),
+        autoWidth = TRUE,
+        processing = FALSE,
+        pageLength = {
+          if (is.null(pageLength)) 10 else pageLength
+        },
+        lengthMenu = list(c(5, 10, 25, 50, -1), c("5", "10", "25", "50", "All"))
+      ),
+      ## https://github.com/rstudio/DT/issues/146#issuecomment-534319155
+      callback = DT::JS('$(window).on("unload", function() { table.state.clear(); })')
+    )
+    return(dt_cat_tab)
+  } else {
+    sketch_num <- shiny::withTags(
+      table(
+        thead(
+          tr(lapply(colnames(tab), th))
+        )
+      )
+    )
+    dt_num_tab <- DT::datatable(
+      tab,
+      container = sketch_num,
+      caption = caption,
+      selection = "none",
+      rownames = FALSE,
+      filter = fbox,
+      ## must use fillContainer = FALSE to address
+      ## see https://github.com/rstudio/DT/issues/367
+      ## https://github.com/rstudio/DT/issues/379
+      fillContainer = FALSE,
+      style = style,
+      options = list(
+        dom = dom,
+        stateSave = TRUE, ## store state
+        searchCols = searchCols,
+        order = order,
+        columnDefs = list(list(orderSequence = c("desc", "asc"), targets = "_all")),
+        autoWidth = TRUE,
+        processing = FALSE,
+        pageLength = {
+          if (is.null(pageLength)) 10 else pageLength
+        },
+        lengthMenu = list(c(5, 10, 25, 50, -1), c("5", "10", "25", "All"))
+      ),
+      ## https://github.com/rstudio/DT/issues/146#issuecomment-534319155
+      callback = DT::JS('$(window).on("unload", function() { table.state.clear(); })')
+    )
+
+    ## rounding as needed
+    if (sum(isDbl) > 0) {
+      dt_num_tab <- DT::formatRound(dt_num_tab, names(isDbl)[isDbl], dec)
+    }
+    if (sum(isInt) > 0) {
+      dt_num_tab <- DT::formatRound(dt_num_tab, names(isInt)[isInt], 0)
+    }
+
+    ## see https://github.com/yihui/knitr/issues/1198
+    dt_num_tab$dependencies <- c(
+      list(rmarkdown::html_dependency_bootstrap("bootstrap")),
+      dt_num_tab$dependencies
+    )
+    return(dt_num_tab)
   }
-  if (sum(isInt) > 0) {
-    dt_tab <- DT::formatRound(dt_tab, names(isInt)[isInt], 0)
-  }
-
-  ## see https://github.com/yihui/knitr/issues/1198
-  dt_tab$dependencies <- c(
-    list(rmarkdown::html_dependency_bootstrap("bootstrap")),
-    dt_tab$dependencies
-  )
-
-  dt_tab
 }
+
 
 ###########################################
 ## turn functions below into functional ...
