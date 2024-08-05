@@ -13,9 +13,8 @@ expl_inputs <- reactive({
   expl_args$rows <- if (input$show_filter) input$data_rows else ""
   expl_args$dataset <- input$dataset
 
-  # Use selected variables based on variable type
-  selected_vars <- input$expl_vars
-  expl_args$vars <- selected_vars
+  # Update the variable type
+  expl_args$variable <- if (input$variable_type == "Numeric") "num" else "cat"
 
   for (i in r_drop(names(expl_args))) {
     expl_args[[i]] <- input[[paste0("expl_", i)]]
@@ -49,47 +48,41 @@ varnames <- reactive({
 
 ## UI-elements for explore
 
-output$ui_expl_var_type <- renderUI({
+output$ui_expl_vars <- renderUI({
+  vars <- varnames()
+  req(available(vars))
+
+  # Dropdown for variable type selection
   selectInput(
-    "expl_var_type",
-    label = "Variable type:",
-    choices = c("Numeric" = "numeric", "Categorical" = "categorical"),
-    selected = "numeric"
+    "variable_type",
+    label = "Select variable type:",
+    choices = c("Numeric", "Categorical"),
+    selected = "Numeric"
   )
 })
 
-output$ui_expl_vars <- renderUI({
-  req(input$dataset)
-  dataset <- get(input$dataset, envir = r_data, inherits = TRUE)
-  if (is.null(dataset)) return(NULL)
+output$ui_expl_var_selection <- renderUI({
+  vars <- varnames()
+  req(available(vars))
 
-  vars <- names(dataset)
-
-  # Identify binary variables (containing only 0 and 1)
-  binary_vars <- vars[sapply(dataset, function(x) all(x %in% c(0, 1)))]
-
-  if (input$expl_var_type == "numeric") {
-    variable_choices <- vars[sapply(dataset, is.numeric)]
-    variable_choices <- setdiff(variable_choices, binary_vars)  # Exclude binary variables
+  if (input$variable_type == "Numeric") {
     selectInput(
       "expl_vars",
       label = "Numeric variable(s):",
-      choices = variable_choices,
-      selected = state_multiple("expl_vars", variable_choices, isolate(input$expl_vars)),
+      choices = vars,
+      selected = state_multiple("expl_vars", vars, isolate(input$expl_vars)),
       multiple = TRUE,
-      size = min(8, length(variable_choices)),
+      size = min(8, length(vars)),
       selectize = FALSE
     )
   } else {
-    variable_choices <- vars[sapply(dataset, function(x) is.factor(x) || is.character(x))]
-    variable_choices <- union(variable_choices, binary_vars)  # Include binary variables
     selectInput(
       "expl_vars",
       label = "Categorical variable(s):",
-      choices = variable_choices,
-      selected = state_multiple("expl_vars", variable_choices, isolate(input$expl_vars)),
+      choices = vars,
+      selected = state_multiple("expl_vars", vars, isolate(input$expl_vars)),
       multiple = TRUE,
-      size = min(8, length(variable_choices)),
+      size = min(8, length(vars)),
       selectize = FALSE
     )
   }
@@ -143,23 +136,10 @@ output$ui_expl_fun <- renderUI({
       input$expl_fun
     }
   })
-
-  # Define the allowed functions for categorical variables
-  categorical_funs <- c("n_missing", "modal", "n_obs", "n_distinct")
-
-  # Select functions based on variable type
-  available_funs <- if (input$expl_var_type == "categorical") {
-    categorical_funs
-  } else {
-    r_funs
-  }
-
   selectizeInput(
     "expl_fun",
     label = "Apply function(s):",
-    choices = available_funs,
-    selected = sel[sel %in% available_funs],  # Ensure the selected functions are in the allowed list
-    multiple = TRUE,
+    choices = r_funs, selected = sel, multiple = TRUE,
     options = list(
       placeholder = "Select functions",
       plugins = list("remove_button", "drag_drop")
@@ -202,8 +182,8 @@ output$ui_Explore <- renderUI({
       uiOutput("ui_expl_run")
     ),
     wellPanel(
-      uiOutput("ui_expl_var_type"),
       uiOutput("ui_expl_vars"),
+      uiOutput("ui_expl_var_selection"),
       uiOutput("ui_expl_byvar"),
       uiOutput("ui_expl_fun"),
       uiOutput("ui_expl_top"),
@@ -230,18 +210,20 @@ output$ui_Explore <- renderUI({
 })
 
 .explore <- eventReactive(input$expl_run, {
-  req(input$dataset)
-  dataset <- get(input$dataset, envir = r_data, inherits = TRUE)
-  combined_vars <- input$expl_vars
-  if (not_available(combined_vars) || is.null(input$expl_top)) {
-    return(NULL)
+  if (not_available(input$expl_vars) || is.null(input$expl_top)) {
+    return()
   } else if (!is.empty(input$expl_byvar) && not_available(input$expl_byvar)) {
-    return(NULL)
-  } else if (available(input$expl_byvar) && any(input$expl_byvar %in% combined_vars)) {
-    return(NULL)
+    return()
+  } else if (available(input$expl_byvar) && any(input$expl_byvar %in% input$expl_vars)) {
+    return()
   }
+
   expli <- expl_inputs()
   expli$envir <- r_data
+
+  # Add the variable argument
+  expli$variable <- if (input$variable_type == "Numeric") "num" else "cat"
+
   sshhr(do.call(explore, expli))
 })
 
@@ -285,43 +267,16 @@ output$explore <- DT::renderDataTable({
       searchCols <- lapply(r_state$explore_search_columns, function(x) list(search = x))
       order <- r_state$explore_state$order
       pageLength <- r_state$explore_state$length
-
-      # Assuming df is the data frame and expl_vars are the selected variables
-      dataset <- get(input$dataset, envir = r_data, inherits = TRUE)
-      vars <- input$expl_vars
-      var_type <- sapply(dataset[vars], class)
-
-      # Check if any binary variable is included
-      binary_vars <- vars[sapply(dataset[vars], function(x) all(x %in% c(0, 1)))]
-
-      if (input$expl_var_type == "categorical" && (all(var_type %in% c("factor", "character")) || length(binary_vars) > 0)) {
-        result <- dataset %>%
-          mutate(across(all_of(binary_vars), as.character)) %>%
-          group_by(across(all_of(vars))) %>%
-          summarise(
-            Count = n(),
-            Percentage = round((n() / nrow(dataset)) * 100, 2)
-          ) %>%
-          rename(Level = !!sym(vars))
-
-        # Add row for missing values
-        missing_count <- dataset %>%
-          summarise(across(all_of(vars), ~sum(is.na(.)))) %>%
-          summarise(Missing = sum(.))
-
-        missing_percentage <- round((missing_count$Missing / nrow(dataset)) * 100, 2)
-
-        result <- result %>%
-          add_row(Level = "Missing", Count = missing_count$Missing, Percentage = missing_percentage)
-
-        DT::datatable(result) %>%
-          DT::formatStyle('Percentage', textAlign = 'center') %>%
-          DT::formatStyle('Count', textAlign = 'center') %>%
-          DT::formatStyle('Level', textAlign = 'center')
-      } else {
-        DT::datatable(expl$tab)
-      }
     })
+
+    caption <- if (is.empty(input$expl_tab_slice)) NULL else glue("Table slice {input$expl_tab_slice} will be applied on Download, Store, or Report")
+    dtab(
+      expl,
+      dec = input$expl_dec, searchCols = searchCols, order = order,
+      variable = expl_args$variable,
+      pageLength = pageLength,
+      caption = caption
+    )
   })
 })
 
