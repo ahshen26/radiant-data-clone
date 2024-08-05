@@ -210,21 +210,25 @@ output$ui_Explore <- renderUI({
 })
 
 .explore <- eventReactive(input$expl_run, {
-  if (not_available(input$expl_vars) || is.null(input$expl_top)) {
-    return()
-  } else if (!is.empty(input$expl_byvar) && not_available(input$expl_byvar)) {
-    return()
-  } else if (available(input$expl_byvar) && any(input$expl_byvar %in% input$expl_vars)) {
-    return()
-  }
+  suppressWarnings({
+    suppressMessages({
+      if (not_available(input$expl_vars) || is.null(input$expl_top)) {
+        return()
+      } else if (!is.empty(input$expl_byvar) && not_available(input$expl_byvar)) {
+        return()
+      } else if (available(input$expl_byvar) && any(input$expl_byvar %in% input$expl_vars)) {
+        return()
+      }
 
-  expli <- expl_inputs()
-  expli$envir <- r_data
+      expli <- expl_inputs()
+      expli$envir <- r_data
 
-  # Add the variable argument
-  expli$variable <- if (input$variable_type == "Numeric") "num" else "cat"
+      # Add the variable argument
+      expli$variable <- if (input$variable_type == "Numeric") "num" else "cat"
 
-  sshhr(do.call(explore, expli))
+      sshhr(do.call(explore, expli))
+    })
+  })
 })
 
 observeEvent(input$explore_search_columns, {
@@ -244,39 +248,43 @@ expl_reset <- function(var, ncol) {
 }
 
 output$explore <- DT::renderDataTable({
-  input$expl_run
-  withProgress(message = "Generating explore table", value = 1, {
-    isolate({
-      expl <- .explore()
-      req(!is.null(expl))
-      expl$shiny <- TRUE
+  suppressWarnings({
+    suppressMessages({
+      input$expl_run
+      withProgress(message = "Generating explore table", value = 1, {
+        isolate({
+          expl <- .explore()
+          req(!is.null(expl))
+          expl$shiny <- TRUE
 
-      ## resetting DT when changes occur
-      nc <- ncol(expl$tab)
-      expl_reset("expl_vars", nc)
-      expl_reset("expl_byvar", nc)
-      expl_reset("expl_fun", nc)
-      if (!is.null(r_state$expl_top) &&
-          !is.null(input$expl_top) &&
-          !identical(r_state$expl_top, input$expl_top)) {
-        r_state$expl_top <<- input$expl_top
-        r_state$explore_state <<- list()
-        r_state$explore_search_columns <<- rep("", nc)
-      }
+          ## resetting DT when changes occur
+          nc <- ncol(expl$tab)
+          expl_reset("expl_vars", nc)
+          expl_reset("expl_byvar", nc)
+          expl_reset("expl_fun", nc)
+          if (!is.null(r_state$expl_top) &&
+              !is.null(input$expl_top) &&
+              !identical(r_state$expl_top, input$expl_top)) {
+            r_state$expl_top <<- input$expl_top
+            r_state$explore_state <<- list()
+            r_state$explore_search_columns <<- rep("", nc)
+          }
 
-      searchCols <- lapply(r_state$explore_search_columns, function(x) list(search = x))
-      order <- r_state$explore_state$order
-      pageLength <- r_state$explore_state$length
+          searchCols <- lapply(r_state$explore_search_columns, function(x) list(search = x))
+          order <- r_state$explore_state$order
+          pageLength <- r_state$explore_state$length
+        })
+
+        caption <- if (is.empty(input$expl_tab_slice)) NULL else glue("Table slice {input$expl_tab_slice} will be applied on Download, Store, or Report")
+        dtab(
+          expl,
+          dec = input$expl_dec, searchCols = searchCols, order = order,
+          variable = expl_args$variable,
+          pageLength = pageLength,
+          caption = caption
+        )
+      })
     })
-
-    caption <- if (is.empty(input$expl_tab_slice)) NULL else glue("Table slice {input$expl_tab_slice} will be applied on Download, Store, or Report")
-    dtab(
-      expl,
-      dec = input$expl_dec, searchCols = searchCols, order = order,
-      variable = expl_args$variable,
-      pageLength = pageLength,
-      caption = caption
-    )
   })
 })
 
@@ -288,7 +296,6 @@ dl_explore_tab <- function(path) {
     rows <- input$explore_rows_all
     dat$tab %>%
       (function(x) if (is.null(rows)) x else x[rows, , drop = FALSE]) %>%
-      (function(x) if (is.empty(input$expl_tab_slice)) x else slice_data(x, input$expl_tab_slice)) %>%
       write.csv(path, row.names = FALSE)
   }
 }
@@ -317,8 +324,7 @@ observeEvent(input$expl_store, {
   }
   rows <- input$explore_rows_all
   dat$tab <- dat$tab %>%
-    (function(x) if (is.null(rows)) x else x[rows, , drop = FALSE]) %>%
-    (function(x) if (is.empty(input$expl_tab_slice)) x else slice_data(x, input$expl_tab_slice))
+    (function(x) if (is.null(rows)) x else x[rows, , drop = FALSE])
   r_data[[dataset]] <- dat$tab
   register(dataset)
   updateSelectInput(session, "dataset", selected = input$dataset)
