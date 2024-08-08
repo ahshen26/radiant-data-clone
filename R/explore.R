@@ -192,11 +192,11 @@ explore <- function(dataset, vars = "", byvar = "", fun = c("mean", "sd"),
   tab <- ungroup(tab) %>% mutate_all(check_int)
 
   ## slicing the table if desired
-  if (!is.empty(tabslice)) {
-    tab <- tab %>%
-      slice_data(tabslice) %>%
-      droplevels()
-  }
+  #if (!is.empty(tabslice)) {
+    #tab <- tab %>%
+     # slice_data(tabslice) %>%
+     # droplevels()
+ # }
 
   ## convert to data.frame to maintain attributes
   tab <- as.data.frame(tab, stringsAsFactors = FALSE)
