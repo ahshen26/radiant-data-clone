@@ -372,6 +372,7 @@ flip <- function(expl, top = "fun") {
 #' @seealso \code{\link{pivotr}} to create a pivot table
 #' @seealso \code{\link{summary.pivotr}} to show summaries
 #'
+#' @importFrom DT datatable formatRound JS
 #' @export
 dtab.explore <- function(object, dec = 3, searchCols = NULL,
                          order = NULL, pageLength = NULL,
