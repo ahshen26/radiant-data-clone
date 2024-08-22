@@ -11,7 +11,7 @@ Description: The Radiant Data menu includes interfaces for loading, saving,
     contains functionality to generate reproducible reports of the analyses
     conducted in the application.
 Depends:
-    R (>= 4.3.0),
+    R (>= 4.2.0),
     magrittr (>= 1.5),
     ggplot2 (>= 3.4.2),
     lubridate (>= 1.7.4),
